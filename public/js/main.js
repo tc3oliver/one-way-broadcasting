@@ -2,7 +2,7 @@
 const localVideo = document.querySelector('video#localVideo')
 
 let localStream
-let peerConn
+let PCs = {}
 let socket
 
 const room = 'room1'
@@ -16,22 +16,29 @@ function connectIO() {
   socket = io('ws://0.0.0.0:8088')
 
 
-  socket.on('ice_candidate', async (data) => {
+  socket.on('ice_candidate', async (data, id) => {
     console.log('收到 ice_candidate')
     const candidate = new RTCIceCandidate({
       sdpMLineIndex: data.label,
       candidate: data.candidate,
     })
-    await peerConn.addIceCandidate(candidate)
+    await PCs[id].addIceCandidate(candidate)
   })
 
-  socket.on('offer', async (desc) => {
+  socket.on('offer', async (desc, id) => {
     console.log('收到 offer')
+    const pc = initPeerConnection()
+    PCs[id] = pc
     // 設定對方的配置
-    await peerConn.setRemoteDescription(desc)
+    await pc.setRemoteDescription(desc)
 
     // 發送 answer
-    await sendSDP(false)
+    await sendSDP(false, pc)
+  })
+
+  socket.on('bye', async (id) => {
+    console.log(id, '中斷連線')
+    delete PCs[id]
   })
 
   socket.emit('join', room)
@@ -67,7 +74,7 @@ function initPeerConnection() {
       },
     ],
   }
-  peerConn = new RTCPeerConnection(configuration)
+  let peerConn = new RTCPeerConnection(configuration)
 
   // 增加本地串流
   localStream.getTracks().forEach((track) => {
@@ -91,32 +98,35 @@ function initPeerConnection() {
   peerConn.oniceconnectionstatechange = (e) => {
     if (e.target.iceConnectionState === 'disconnected') {
       console.log("remote disconnected");
+      
     }
   }
+
+  return peerConn
 }
 
 /**
  * 處理信令
  * @param {Boolean} isOffer 是 offer 還是 answer
  */
-async function sendSDP(isOffer) {
+async function sendSDP(isOffer, pc) {
   try {
-    if (!peerConn) {
+    if (!pc) {
       initPeerConnection()
     }
 
     // 創建SDP信令
-    const localSDP = await peerConn[isOffer ? 'createOffer' : 'createAnswer']({
+    const localSDP = await pc[isOffer ? 'createOffer' : 'createAnswer']({
       offerToReceiveAudio: true, // 是否傳送聲音流給對方
       offerToReceiveVideo: true, // 是否傳送影像流給對方
     })
 
     // 設定本地SDP信令
-    await peerConn.setLocalDescription(localSDP)
+    await pc.setLocalDescription(localSDP)
 
     // 寄出SDP信令
     let e = isOffer ? 'offer' : 'answer'
-    socket.emit(e, room, peerConn.localDescription)
+    socket.emit(e, room, pc.localDescription)
   } catch (err) {
     throw err
   }
@@ -128,7 +138,6 @@ async function sendSDP(isOffer) {
  */
 async function init() {
   await createStream()
-  initPeerConnection()
   connectIO()
 }
 

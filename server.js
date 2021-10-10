@@ -11,14 +11,16 @@ const io = require('socket.io')(http, {
 
 // 有人連線就會觸發
 io.on('connection', (socket) => {
+  let userRoom
   // 加入房間
   socket.on('join', (room) => {
+    userRoom = room
     socket.join(room)
   })
 
   // 轉傳 Offer
   socket.on('offer', (room, desc) => {
-    socket.to(room).emit('offer', desc)
+    socket.to(room).emit('offer', desc, socket.id)
   })
 
   // 轉傳 Answer
@@ -28,13 +30,13 @@ io.on('connection', (socket) => {
 
   // 交換 ice candidate
   socket.on('ice_candidate', (room, data) => {
-    socket.to(room).emit('ice_candidate', data)
+    socket.to(room).emit('ice_candidate', data, socket.id)
   })
 
-  // 離開房間
-  socket.on('leave', (room) => {
-    socket.to(room).emit('bye')
-    socket.emit('leaved')
+  // 中斷連線
+  socket.on('disconnect', () => {
+    console.log(userRoom, socket.id, 'dis')
+    socket.to(userRoom).emit('bye', socket.id)
   })
 })
 
